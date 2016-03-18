@@ -72,6 +72,7 @@
 -- * <code>bypass_cache</code>: Do not perform a lookup in the local HTTP cache.
 -- * <code>no_cache</code>: Do not save the result of this request to the local HTTP cache.
 -- * <code>no_cache_body</code>: Do not save the body of the response to the local HTTP cache.
+-- * <code>any_af</code>: Allow connecting to any address family, inet or inet6. By default, these functions will only use the same AF as nmap.address_family to resolve names.
 -- * <code>redirect_ok</code>: Closure that overrides the default redirect_ok used to validate whether to follow HTTP redirects or not. False, if no HTTP redirects should be followed. Alternatively, a number may be passed to change the number of redirects to follow.
 --   The following example shows how to write a custom closure that follows 5 consecutive redirects, without the safety checks in the default redirect_ok:
 --   <code>
@@ -112,6 +113,7 @@ local coroutine = require "coroutine"
 local nmap = require "nmap"
 local os = require "os"
 local sasl = require "sasl"
+local slaxml = require "slaxml"
 local stdnse = require "stdnse"
 local string = require "string"
 local table = require "table"
@@ -305,7 +307,12 @@ local function validate_options(options)
                 stdnse.debug1("http: options.cookies[i].expires should be a string")
                 bad = true
               end
-            else
+            elseif(cookie_key == 'max-age') then
+              if(type(cookie_value) ~= 'string') then
+                stdnse.debug1("http: options.cookies[i].max-age should be a string")
+                bad = true
+              end
+            elseif not (cookie_key == 'httponly' or cookie_key == 'secure') then
               stdnse.debug1("http: Unknown field in cookie table: %s", cookie_key)
               bad = true
             end
@@ -341,7 +348,7 @@ local function validate_options(options)
       end
     elseif (key == 'ntlmauth') then
       stdnse.debug1("Proceeding with ntlm message")
-    elseif(key == 'bypass_cache' or key == 'no_cache' or key == 'no_cache_body') then
+    elseif(key == 'bypass_cache' or key == 'no_cache' or key == 'no_cache_body' or key == 'any_af') then
       if(type(value) ~= 'boolean') then
         stdnse.debug1("http: options.bypass_cache, options.no_cache, and options.no_cache_body must be boolean values")
         bad = true
@@ -871,8 +878,8 @@ end
 --  @param path If the argument exists, only cookies with this path are included to the request
 --  @return A string to be added to the mod_options table
 local function buildCookies(cookies, path)
-  local cookie = ""
   if type(cookies) == 'string' then return cookies end
+  local cookie = {}
   for _, ck in ipairs(cookies or {}) do
     local ckpath = ck["path"]
     if not path or not ckpath
@@ -880,10 +887,10 @@ local function buildCookies(cookies, path)
       or ckpath:sub(-1) == "/" and ckpath == path:sub(1, ckpath:len())
       or ckpath .. "/" == path:sub(1, ckpath:len()+1)
       then
-        cookie = cookie .. ck["name"] .. "=" .. ck["value"] .. "; "
+        cookie[#cookie+1] = ck["name"] .. "=" .. ck["value"]
       end
     end
-  return cookie:gsub("; $","")
+  return table.concat(cookie, "; ")
 end
 
 -- HTTP cache.
@@ -1190,9 +1197,15 @@ local function request(host, port, data, options)
 
   method = string.match(data, "^(%S+)")
 
+  if type(host) == "string" and options.any_af then
+    local status, addrs = nmap.resolve(host)
+    host = addrs[1] or host
+  end
+
   local socket, partial, opts = comm.tryssl(host, port, data, { timeout = options.timeout })
 
   if not socket then
+    stdnse.debug1("http.request socket error: %s", partial)
     return http_error("Error creating socket.")
   end
 
@@ -2073,7 +2086,7 @@ local function get_attr (html, name)
   if not value then
     value = html:match('^[^%s<>=\'"`]+', pos)
   end
-  return value
+  return slaxml.parser.unescape(value)
 end
 ---
 -- Parses a form, that is, finds its action and fields.

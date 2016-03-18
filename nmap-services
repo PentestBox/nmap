@@ -3,7 +3,7 @@
 # Well known service port numbers -*- mode: fundamental; -*-
 # From the Nmap Security Scanner ( http://nmap.org )
 #
-# $Id: nmap-services 35292 2015-10-02 07:52:30Z fyodor $
+# $Id: nmap-services 35385 2015-11-05 20:41:05Z dmiller $
 #
 # Derived from IANA data and our own research
 # 
